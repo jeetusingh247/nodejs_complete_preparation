@@ -1,0 +1,6 @@
+#Ignore
+.env
+index.html
+package-lock.json
+package.json
+node_modules
