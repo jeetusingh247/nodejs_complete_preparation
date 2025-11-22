@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RBAC Test Client</title>
+  <style>
+    body{font-family: Arial, sans-serif;padding:20px}
+    .box{border:1px solid #ddd;padding:16px;margin-bottom:12px;border-radius:6px}
+    input,select{padding:6px;margin:4px}
+    button{padding:6px 10px;margin:4px}
+    pre{background:#f5f5f5;padding:8px;border-radius:4px}
+  </style>
+</head>
+<body>
+  <h1>RBAC Test Client</h1>
+
+  <div class="box">
+    <h3>Login</h3>
+    <div style="margin-bottom:8px">
+      <input id="name" placeholder="name (for register)" />
+      <input id="roleNames" placeholder="roles (comma separated, e.g. User)" />
+    </div>
+    <input id="email" placeholder="email" value="admin@example.com" />
+    <input id="password" placeholder="password" value="Admin@123" type="password" />
+    <button id="btnLogin">Login</button>
+    <button id="btnRegister">Register</button>
+    <button id="btnRefresh">Refresh Token</button>
+    <button id="btnLogout">Logout</button>
+    <div id="loginResult"></div>
+  </div>
+
+  <div class="box">
+    <h3>Admin Endpoints</h3>
+    <button id="btnAdminOnly">GET /api/admin/admin-only</button>
+    <button id="btnManage">GET /api/admin/manage</button>
+    <button id="btnUsers">GET /api/admin/users</button>
+    <div style="margin-top:8px">
+      <input id="userId" placeholder="user id" />
+      <select id="roleSelect"><option>Admin</option><option>Manager</option><option>User</option></select>
+      <input id="permission" placeholder="permission (delete:user)" />
+      <button id="btnUpdateRole">Update Role</button>
+      <button id="btnTogglePermission">Toggle Permission</button>
+      <button id="btnDeleteUser">Soft Delete User</button>
+    </div>
+    <div id="adminResult"></div>
+  </div>
+
+  <div class="box">
+    <h3>Stored Tokens / User</h3>
+    <pre id="storage">(none)</pre>
+  </div>
+
+<script>
+const ROOT = location.origin; // will be http://localhost:4000 when served by backend
+
+const setStorageView = () => {
+  const accessToken = localStorage.getItem('accessToken');
+  const user = localStorage.getItem('user');
+  document.getElementById('storage').textContent = JSON.stringify({ accessToken: !!accessToken, user: user ? JSON.parse(user) : null }, null, 2);
+};
+setStorageView();
+
+const show = (elId, data) => { document.getElementById(elId).innerHTML = '<pre>'+JSON.stringify(data, null, 2)+'</pre>'; };
+
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('accessToken');
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  return headers;
+};
+
+document.getElementById('btnLogin').onclick = async () => {
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  try {
+    const res = await fetch('/api/auth/login', { method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email, password }) });
+    const data = await res.json();
+    if (!res.ok) return show('loginResult', { status: res.status, body: data });
+    // store access token and user
+    if (data.accessToken) localStorage.setItem('accessToken', data.accessToken);
+    if (data.user) localStorage.setItem('user', JSON.stringify(data.user));
+    show('loginResult', data);
+    setStorageView();
+  } catch (err) { show('loginResult', { error: String(err) }); }
+};
+
+document.getElementById('btnRegister').onclick = async () => {
+  const name = document.getElementById('name').value;
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const rolesRaw = document.getElementById('roleNames').value;
+  const roleNames = rolesRaw ? rolesRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
+  try {
+    const res = await fetch('/api/auth/register', { method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, email, password, roleNames }) });
+    const data = await res.json();
+    if (!res.ok) {
+      // if user exists (409) suggest login
+      if (res.status === 409) return show('loginResult', { status: res.status, body: data, hint: 'User already exists — try logging in' });
+      return show('loginResult', { status: res.status, body: data });
+    }
+    show('loginResult', data);
+  } catch (err) { show('loginResult', { error: String(err) }); }
+};
+
+document.getElementById('btnRefresh').onclick = async () => {
+  try {
+    const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+    const data = await res.json();
+    if (!res.ok) return show('loginResult', { status: res.status, body: data });
+    if (data.accessToken) localStorage.setItem('accessToken', data.accessToken);
+    if (data.user) localStorage.setItem('user', JSON.stringify(data.user));
+    show('loginResult', data);
+    setStorageView();
+  } catch (err) { show('loginResult', { error: String(err) }); }
+};
+
+document.getElementById('btnLogout').onclick = async () => {
+  try {
+    const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    const data = await res.json();
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('user');
+    show('loginResult', data);
+    setStorageView();
+  } catch (err) { show('loginResult', { error: String(err) }); }
+};
+
+// Admin actions
+
+document.getElementById('btnAdminOnly').onclick = async () => {
+  try {
+    const res = await fetch('/api/admin-only', { method: 'GET', credentials: 'include', headers: getAuthHeaders() });
+    const data = await res.json();
+    show('adminResult', { status: res.status, body: data });
+  } catch (err) { show('adminResult', { error: String(err) }); }
+};
+
+document.getElementById('btnManage').onclick = async () => {
+  try {
+    const res = await fetch('/api/manage', { method: 'GET', credentials: 'include', headers: getAuthHeaders() });
+    const data = await res.json();
+    show('adminResult', { status: res.status, body: data });
+  } catch (err) { show('adminResult', { error: String(err) }); }
+};
+
+document.getElementById('btnUsers').onclick = async () => {
+  try {
+    const res = await fetch('/api/admin/users', { method: 'GET', credentials: 'include', headers: getAuthHeaders() });
+    const data = await res.json();
+    show('adminResult', { status: res.status, body: data });
+  } catch (err) { show('adminResult', { error: String(err) }); }
+};
+
+document.getElementById('btnUpdateRole').onclick = async () => {
+  const id = document.getElementById('userId').value;
+  const role = document.getElementById('roleSelect').value;
+  if (!id) return alert('Provide user id');
+  try {
+    const res = await fetch(`/api/admin/role/${encodeURIComponent(id)}`, { method: 'PUT', credentials: 'include', headers: getAuthHeaders(), body: JSON.stringify({ role }) });
+    const data = await res.json();
+    show('adminResult', { status: res.status, body: data });
+  } catch (err) { show('adminResult', { error: String(err) }); }
+};
+
+document.getElementById('btnTogglePermission').onclick = async () => {
+  const id = document.getElementById('userId').value;
+  const permission = document.getElementById('permission').value || 'delete:user';
+  if (!id) return alert('Provide user id');
+  try {
+    const res = await fetch(`/api/admin/permission/${encodeURIComponent(id)}`, { method: 'PUT', credentials: 'include', headers: getAuthHeaders(), body: JSON.stringify({ permission }) });
+    const data = await res.json();
+    show('adminResult', { status: res.status, body: data });
+  } catch (err) { show('adminResult', { error: String(err) }); }
+};
+
+document.getElementById('btnDeleteUser').onclick = async () => {
+  const id = document.getElementById('userId').value;
+  if (!id) return alert('Provide user id');
+  try {
+    const res = await fetch(`/api/admin/user/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'include', headers: getAuthHeaders() });
+    const data = await res.json();
+    show('adminResult', { status: res.status, body: data });
+  } catch (err) { show('adminResult', { error: String(err) }); }
+};
+
+</script>
+</body>
+</html>
